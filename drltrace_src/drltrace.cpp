@@ -45,6 +45,9 @@
 /* Where to write the trace */
 static file_t outf;
 
+/* Lock object for output file. Coerces syncronious writing of log files. */
+void *outf_lock = NULL;
+
 /* Avoid exe exports, as on Linux many apps have a ton of global symbols. */
 static app_pc exe_start;
 
@@ -346,6 +349,9 @@ lib_entry(void *wrapcxt, INOUT void **user_data)
     if (tested && !allowed)
       return;
 
+    if(outf_lock != NULL)
+        dr_mutex_lock(outf_lock);
+
     tid = dr_get_thread_id(drcontext);
     if (tid != INVALID_THREAD_ID)
         dr_fprintf(outf, "~~%d~~ ", tid);
@@ -372,6 +378,10 @@ lib_entry(void *wrapcxt, INOUT void **user_data)
         }
     }
     dr_fprintf(outf, "\n");
+
+    if(outf_lock != NULL)
+        dr_mutex_unlock(outf_lock);
+        
     if (mod != NULL)
         dr_free_module_data(mod);
 }
@@ -474,6 +484,8 @@ event_module_unload(void *drcontext, const module_data_t *info)
 static void
 open_log_file(void)
 {
+    outf_lock = dr_mutex_create();
+
     char buf[MAXIMUM_PATH];
     if (op_logdir.get_value().compare("-") == 0)
         outf = STDERR;
@@ -669,6 +681,12 @@ event_exit(void)
         if (op_print_ret_addr.get_value())
             drmodtrack_dump(outf);
         dr_close_file(outf);
+
+        if(outf_lock != NULL)
+		{
+            dr_mutex_destroy(outf_lock);
+			outf_lock = NULL;
+		}
     }
 
     free_wblist_array(&filter_function_whitelist, filter_function_whitelist_len);
